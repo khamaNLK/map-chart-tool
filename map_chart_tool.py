@@ -3,11 +3,9 @@ import pandas as pd
 import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
+import plotly.express as px
 
-st.set_page_config(page_title="🗺️ Công cụ tương tác NDVI – LST theo xã (v3.0)", layout="wide")
+st.set_page_config(page_title="🗺️ Công cụ tương tác NDVI – LST theo xã (v3.1)", layout="wide")
 
 # ------------------------
 # 🔧 Đọc và xử lý dữ liệu
@@ -80,47 +78,58 @@ def create_map(df, heat_type="NDVI_HCM_B"):
 
 
 # ------------------------
-# 📊 Scatter & Histogram
+# 📊 Scatter & Histogram (Plotly)
 # ------------------------
 def scatter_plot(df, selected_commune=None):
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.scatterplot(data=df, x="NDVI_HCM_B", y="LST_HCM_BD", ax=ax)
-    sns.regplot(data=df, x="NDVI_HCM_B", y="LST_HCM_BD", scatter=False, ax=ax, color="red")
+    fig = px.scatter(
+        df,
+        x="NDVI_HCM_B",
+        y="LST_HCM_BD",
+        hover_data=["tenXa"],
+        title="Mối tương quan NDVI – LST",
+        color="tenXa" if selected_commune == "(Tất cả)" else None,
+        trendline="ols"
+    )
 
-    if selected_commune:
+    if selected_commune and selected_commune != "(Tất cả)":
         commune_data = df[df["tenXa"] == selected_commune]
         if not commune_data.empty:
-            ax.scatter(commune_data["NDVI_HCM_B"], commune_data["LST_HCM_BD"], color="orange", s=100, label=selected_commune)
-            ax.legend()
+            fig.add_scatter(
+                x=commune_data["NDVI_HCM_B"],
+                y=commune_data["LST_HCM_BD"],
+                mode="markers",
+                marker=dict(size=12, color="orange"),
+                name=f"Xã: {selected_commune}",
+            )
 
-    ax.set_title("Mối tương quan NDVI – LST")
-    ax.set_xlabel("NDVI")
-    ax.set_ylabel("LST (°C)")
-    st.pyplot(fig)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def histogram_plot(df):
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.histplot(df["NDVI_HCM_B"].dropna(), bins=10, kde=True, ax=ax)
-    ax.set_title("Phân bố giá trị NDVI toàn vùng")
-    ax.set_xlabel("NDVI")
-    st.pyplot(fig)
+    fig = px.histogram(
+        df,
+        x="NDVI_HCM_B",
+        nbins=10,
+        title="Phân bố giá trị NDVI toàn vùng",
+        marginal="box"
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ------------------------
 # 🚀 Giao diện chính
 # ------------------------
 def main():
-    st.title("🗺️ Công cụ tương tác NDVI – LST theo xã (v3.0)")
+    st.title("🗺️ Công cụ tương tác NDVI – LST theo xã (v3.1)")
 
-    uploaded_file = st.file_uploader("Tải lên file CSV dữ liệu xã/phường", type=["csv"])
+    uploaded_file = st.file_uploader("📂 Tải lên file CSV dữ liệu xã/phường", type=["csv"])
     if not uploaded_file:
-        st.info("📂 Vui lòng tải lên file CSV (ví dụ: 1_1_2018.csv).")
+        st.info("Vui lòng tải lên file CSV (ví dụ: 1_1_2018.csv).")
         st.stop()
 
     df = load_data(uploaded_file)
 
-    st.success(f"Đã tải {len(df)} dòng dữ liệu hợp lệ.")
+    st.success(f"✅ Đã tải {len(df)} dòng dữ liệu hợp lệ.")
 
     # Thống kê nhanh
     col1, col2, col3 = st.columns(3)
@@ -144,20 +153,15 @@ def main():
     with tab2:
         commune_list = sorted(df["tenXa"].dropna().unique())
         selected_commune = st.selectbox("Chọn xã để hiển thị riêng:", ["(Tất cả)"] + commune_list)
-        if selected_commune != "(Tất cả)":
-            scatter_plot(df, selected_commune)
-        else:
-            scatter_plot(df)
+        scatter_plot(df, selected_commune)
 
     # --- Tab 3 ---
     with tab3:
         histogram_plot(df)
 
-    st.markdown("----")
-    st.caption("© 2025 NDVI–LST Map Tool v3.0 | Developed by Đại ca & ChatGPT")
+    st.markdown("---")
+    st.caption("© 2025 NDVI–LST Map Tool v3.1 | Developed by Đại ca & ChatGPT")
 
-# ------------------------
-# Run app
-# ------------------------
+
 if __name__ == "__main__":
     main()
