@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
-import geopandas as gpd
 import folium
 from streamlit_folium import st_folium
-from shapely.geometry import Point
 import plotly.express as px
-import io
 import tempfile
+import re
 
 # ==========================
 # 🔹 HÀM ĐỌC CSV AN TOÀN
@@ -24,6 +22,25 @@ def safe_read_csv(file_path_or_obj):
                 st.error(f"❌ Lỗi đọc CSV: {e}")
                 return None
     return df
+
+
+# ==========================
+# 🔹 HÀM CHUẨN HÓA SỐ THỰC
+# ==========================
+def clean_float(value):
+    if pd.isna(value):
+        return None
+    val = str(value).strip()
+    # Xóa ký tự không phải số, trừ dấu . và -
+    val = re.sub(r"[^0-9\.\-]", "", val)
+    # Nếu có nhiều dấu chấm, chỉ giữ lại dấu đầu tiên
+    if val.count('.') > 1:
+        parts = val.split('.')
+        val = parts[0] + '.' + ''.join(parts[1:])
+    try:
+        return float(val)
+    except:
+        return None
 
 
 # ==========================
@@ -59,26 +76,29 @@ def main():
             lon_col = c
 
     if lat_col is None or lon_col is None:
-        st.error("⚠️ Không tìm thấy cột tọa độ (lat/lon hoặc POINT_X, POINT_Y). Hãy kiểm tra lại CSV.")
+        st.error("⚠️ Không tìm thấy cột tọa độ (lat/lon hoặc POINT_X, POINT_Y).")
         st.stop()
 
+    # Làm sạch dữ liệu tọa độ
+    df[lat_col] = df[lat_col].apply(clean_float)
+    df[lon_col] = df[lon_col].apply(clean_float)
     df = df.dropna(subset=[lat_col, lon_col])
+
     if df.empty:
-        st.error("⚠️ Dữ liệu trống sau khi bỏ dòng thiếu tọa độ.")
+        st.error("⚠️ Dữ liệu trống sau khi xử lý tọa độ.")
         st.stop()
 
     # ==========================
     # 🔹 TẠO BẢN ĐỒ FOLIUM
     # ==========================
     try:
-        center_lat = df[lat_col].astype(float).mean()
-        center_lon = df[lon_col].astype(float).mean()
+        center_lat = df[lat_col].mean()
+        center_lon = df[lon_col].mean()
         folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=10, tiles="CartoDB positron")
     except Exception as e:
         st.error(f"❌ Lỗi tạo bản đồ: {e}")
         st.stop()
 
-    # Thêm điểm lên bản đồ
     for _, row in df.iterrows():
         folium.CircleMarker(
             location=[row[lat_col], row[lon_col]],
@@ -92,38 +112,23 @@ def main():
     st_folium(folium_map, height=500)
 
     # ==========================
-    # 🔹 CHỌN XÃ & VẼ SCATTER NDVI - LST
+    # 🔹 BIỂU ĐỒ NDVI – LST
     # ==========================
     st.subheader("📊 Biểu đồ tương quan NDVI – LST theo xã")
 
-    # Tìm cột xã
-    xa_col = None
-    for c in df.columns:
-        if "xa" in c.lower() or "commune" in c.lower() or "ward" in c.lower():
-            xa_col = c
-            break
+    xa_col = next((c for c in df.columns if any(k in c.lower() for k in ["xa", "commune", "ward"])), None)
+    ndvi_col = next((c for c in df.columns if "ndvi" in c.lower()), None)
+    lst_col = next((c for c in df.columns if "lst" in c.lower()), None)
 
-    if xa_col is None:
-        st.error("⚠️ Không tìm thấy cột tên xã (xa / commune / ward).")
+    if not xa_col or not ndvi_col or not lst_col:
+        st.warning("⚠️ Thiếu cột xã, NDVI hoặc LST — không thể vẽ biểu đồ.")
         st.stop()
 
-    ndvi_col = None
-    lst_col = None
-    for c in df.columns:
-        if "ndvi" in c.lower():
-            ndvi_col = c
-        if "lst" in c.lower():
-            lst_col = c
-
-    if ndvi_col is None or lst_col is None:
-        st.error("⚠️ Không tìm thấy cột NDVI hoặc LST trong dữ liệu.")
-        st.stop()
-
-    xa_selected = st.selectbox("Chọn xã để hiển thị biểu đồ:", sorted(df[xa_col].dropna().unique()))
+    xa_selected = st.selectbox("Chọn xã:", sorted(df[xa_col].dropna().unique()))
 
     df_xa = df[df[xa_col] == xa_selected]
     if df_xa.empty:
-        st.warning("❗ Không có dữ liệu cho xã đã chọn.")
+        st.warning("❗ Không có dữ liệu cho xã này.")
     else:
         fig = px.scatter(
             df_xa,
@@ -136,7 +141,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
 
     # ==========================
-    # 🔹 TẢI XUỐNG DỮ LIỆU ĐÃ XỬ LÝ
+    # 🔹 NÚT TẢI DỮ LIỆU
     # ==========================
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
         df.to_csv(tmp.name, index=False)
